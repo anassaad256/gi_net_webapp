@@ -1,4 +1,16 @@
-# GI-NET Ki-67 Grade Prediction Web Application
+---
+title: GI-NET Ki-67 Grade Prediction
+emoji: 🔬
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+sdk_version: 4.44.0
+app_file: app.py
+pinned: false
+license: mit
+---
+
+# GI-NET Ki-67 Grade Prediction from H&E
 
 A web application for predicting Ki-67 proliferation grade (G1 vs G2+G3) from H&E histopathology images of gastrointestinal neuroendocrine tumors (GI-NETs).
 
@@ -13,12 +25,39 @@ This application uses an Attention-Based Multiple Instance Learning (ABMIL) mode
 
 ### Model Performance
 
-- Overall Accuracy: 94.9%
-- G1 Sensitivity: 97%
-- G2+G3 Sensitivity: 93%
-- Cohen's Kappa: 0.90
+| Metric | Value |
+|--------|-------|
+| Overall Accuracy | 94.9% |
+| G1 Sensitivity | 97% |
+| G2+G3 Sensitivity | 93% |
+| Cohen's Kappa | 0.90 |
 
-## Installation
+## Usage
+
+Simply upload an H&E histopathology image (TIFF, PNG, or JPG) and click "Predict Grade". The application will:
+
+1. Process the image (tiling for large images)
+2. Extract features using H-optimus-0 foundation model
+3. Predict grade using the ABMIL ensemble
+4. Display results with confidence scores and clinical interpretation
+
+## Technical Details
+
+### Architecture
+
+- **Feature Extractor**: H-optimus-0 (1536-dimensional features)
+- **Classifier**: Attention-Based Multiple Instance Learning (ABMIL)
+- **Ensemble**: 5-fold cross-validation ensemble
+
+### Image Processing
+
+- **Small images** (≤1024×1024): Processed as single tile
+- **Large images**: Divided into 1024×1024 tiles with quality control
+  - Minimum 30% tissue content required per tile
+  - Maximum 500 tiles per image
+  - All tiles resized to 224×224 for feature extraction
+
+## Local Installation
 
 ### Prerequisites
 
@@ -27,10 +66,11 @@ This application uses an Attention-Based Multiple Instance Learning (ABMIL) mode
 
 ### Setup
 
-1. Clone or download this repository:
+1. Clone the repository:
 
 ```bash
-cd gi_net_webapp
+git clone https://huggingface.co/spaces/YOUR_USERNAME/gi-net-ki67-prediction
+cd gi-net-ki67-prediction
 ```
 
 2. Install dependencies:
@@ -39,47 +79,27 @@ cd gi_net_webapp
 pip install -r requirements.txt
 ```
 
-3. Copy model weights to the `models/ABMIL_binary/` directory:
-
-```
-models/
-└── ABMIL_binary/
-    ├── model_fold0.pt
-    ├── model_fold1.pt
-    ├── model_fold2.pt
-    ├── model_fold3.pt
-    └── model_fold4.pt
-```
-
-## Usage
-
-### Running the Web Application
+3. Run the application:
 
 ```bash
 python app.py
 ```
 
-The application will be available at:
-- Local: `http://localhost:7860`
-- Public: A shareable link will be displayed in the terminal (if `share=True`)
-
 ### Environment Variables
 
-- `MODEL_DIR`: Path to model weights directory (default: `./models/ABMIL_binary`)
-- `DEVICE`: Device to use for inference - `cuda` or `cpu` (default: `cuda`)
-
-Example:
-```bash
-MODEL_DIR=/path/to/models DEVICE=cpu python app.py
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MODEL_DIR` | Path to model weights directory | `./models/ABMIL_binary` |
+| `MODEL_REPO` | HF Hub repo ID for weight download | (none) |
+| `DEVICE` | Compute device (`cuda` or `cpu`) | `cuda` |
 
 ## Project Structure
 
 ```
-gi_net_webapp/
-├── app.py                 # Main Gradio web application
+.
+├── app.py                 # Gradio web interface
 ├── model.py               # ABMIL model architecture
-├── feature_extractor.py   # H-optimus-0 feature extraction
+├── feature_extractor.py   # H-optimus-0 wrapper
 ├── predictor.py           # GINETPredictor class
 ├── requirements.txt       # Python dependencies
 ├── README.md              # This file
@@ -92,56 +112,10 @@ gi_net_webapp/
         └── model_fold4.pt
 ```
 
-## Technical Details
-
-### Feature Extraction
-
-The application uses [H-optimus-0](https://huggingface.co/bioptimus/H-optimus-0), a vision transformer foundation model trained on histopathology images, to extract 1536-dimensional feature vectors from image tiles.
-
-### ABMIL Architecture
-
-The classifier uses Attention-Based Multiple Instance Learning:
-
-1. **Encoder**: Projects 1536-dim features to 256-dim hidden space with LayerNorm and GELU activation
-2. **Attention**: Computes attention weights for each tile using a two-layer network with Tanh activation
-3. **Aggregation**: Weighted sum of tile features based on attention scores
-4. **Classifier**: Two-layer MLP with LayerNorm and GELU for final classification
-
-### Image Processing Pipeline
-
-- **Small images** (≤1024×1024): Treated as a single tile
-- **Large images**: Divided into 1024×1024 tiles with quality control:
-  - Tiles must contain at least 30% tissue (non-background content)
-  - Maximum 500 tiles per image
-  - All tiles resized to 224×224 for feature extraction
-
-### Ensemble Prediction
-
-The final prediction is an average of probabilities from 5 models trained using 5-fold cross-validation.
-
-## Input Requirements
-
-- **Formats**: TIFF, PNG, JPG
-- **Content**: H&E stained histopathology images
-- **Size**: Any resolution (automatically processed)
-
-## Output
-
-- **Predicted grade**: G1 or G2+G3
-- **Confidence percentage**: Model certainty in the prediction
-- **Probability for each class**: Detailed probability breakdown
-- **Clinical interpretation**: Recommendations based on confidence level
-
-## Notes
-
-- First run will download H-optimus-0 (~600MB) automatically
-- GPU is recommended for faster inference
-- Model weights are approximately 10MB total for all 5 folds
-
 ## Disclaimer
 
-This AI prediction tool is intended for research and clinical decision support only. It is not intended for primary diagnosis. Final grading decisions should be made by a qualified pathologist, ideally with Ki-67 immunohistochemistry when clinically indicated.
+This tool is for **research and clinical decision support only**. It is not intended for primary diagnosis. Final grading decisions should be made by a qualified pathologist, ideally with Ki-67 immunohistochemistry when clinically indicated.
 
 ## License
 
-[Add your license here]
+MIT License

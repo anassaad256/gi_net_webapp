@@ -24,6 +24,47 @@ from model import ABMIL
 from feature_extractor import FeatureExtractor
 
 
+def download_weights_from_hub(repo_id: str, local_dir: str) -> None:
+    """
+    Download model weights from Hugging Face Hub.
+
+    Args:
+        repo_id: Hugging Face Hub repository ID (e.g., "username/gi-net-weights")
+        local_dir: Local directory to save weights
+    """
+    try:
+        from huggingface_hub import hf_hub_download, list_repo_files
+    except ImportError:
+        raise ImportError(
+            "huggingface_hub is required to download weights. "
+            "Install with: pip install huggingface_hub"
+        )
+
+    os.makedirs(local_dir, exist_ok=True)
+
+    # List files in the repo and download model weights
+    try:
+        files = list_repo_files(repo_id)
+        model_files = [f for f in files if f.startswith("model_fold") and f.endswith(".pt")]
+
+        if not model_files:
+            raise FileNotFoundError(f"No model files found in {repo_id}")
+
+        print(f"Downloading {len(model_files)} model files from {repo_id}...")
+        for filename in model_files:
+            print(f"  Downloading {filename}...")
+            hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                local_dir=local_dir,
+                local_dir_use_symlinks=False,
+            )
+        print("Download complete.")
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to download weights from {repo_id}: {e}")
+
+
 def process_image(
     image: np.ndarray | Image.Image,
     feature_extractor: FeatureExtractor,
@@ -119,14 +160,28 @@ class GINETPredictor:
 
     Args:
         model_dir: Directory containing model weight files (model_fold0.pt through model_fold4.pt)
+        model_repo: Optional Hugging Face Hub repository ID to download weights from
         device: Device to run models on ("cuda" or "cpu")
     """
 
-    def __init__(self, model_dir: str, device: str = "cuda"):
+    def __init__(
+        self,
+        model_dir: str,
+        model_repo: str | None = None,
+        device: str = "cuda",
+    ):
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
-        print(f"Loading models on {self.device}...")
+        print(f"Using device: {self.device}")
+
+        # Download weights from HF Hub if specified and not already present
+        if model_repo:
+            first_model = os.path.join(model_dir, "model_fold0.pt")
+            if not os.path.exists(first_model):
+                print(f"Downloading weights from Hugging Face Hub: {model_repo}")
+                download_weights_from_hub(model_repo, model_dir)
 
         # Load ensemble of 5 fold models
+        print("Loading ABMIL ensemble models...")
         self.models = []
         for i in range(5):
             model_path = os.path.join(model_dir, f"model_fold{i}.pt")
@@ -146,8 +201,9 @@ class GINETPredictor:
             print(f"  Loaded model fold {i}")
 
         # Initialize feature extractor
+        print("Loading H-optimus-0 feature extractor...")
         self.feature_extractor = FeatureExtractor(device=str(self.device))
-        print("All models loaded successfully.")
+        print("All models loaded successfully!")
 
     @torch.no_grad()
     def predict(self, image: np.ndarray | Image.Image) -> dict[str, Any]:
@@ -254,7 +310,7 @@ class GINETPredictor:
         grade_text = "G1 (Low Grade)" if pred_class == 0 else "G2+G3 (Intermediate/High Grade)"
 
         interpretation = f"""
-## Prediction: {grade_text}
+### Prediction: {grade_text}
 
 **Confidence Level:** {confidence_level.upper()} ({probs[pred_class]*100:.1f}%)
 
