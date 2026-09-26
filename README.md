@@ -14,6 +14,8 @@ license: mit
 
 A web application for predicting Ki-67 proliferation grade (G1 vs G2+G3) from H&E histopathology images of gastrointestinal neuroendocrine tumors (GI-NETs).
 
+> **⚠️ For research and testing use only. Not for clinical use.** This tool has not been validated or approved for diagnosis, grading, or any patient-care decision.
+
 ## Overview
 
 This application uses an Attention-Based Multiple Instance Learning (ABMIL) model ensemble to predict Ki-67 proliferation grade directly from H&E stained histopathology images, without requiring Ki-67 immunohistochemistry.
@@ -23,14 +25,25 @@ This application uses an Attention-Based Multiple Instance Learning (ABMIL) mode
 - **G1**: Ki-67 <3% (low proliferation)
 - **G2+G3**: Ki-67 ≥3% (intermediate/high proliferation)
 
-### Model Performance
+### Reported Performance
+
+Case-level results on a held-out test set of 44 cases from a single institution (no external validation):
 
 | Metric | Value |
 |--------|-------|
-| Overall Accuracy | 94.9% |
+| Balanced Accuracy | 94.9% |
+| Cohen's Kappa | 0.90 |
 | G1 Sensitivity | 97% |
 | G2+G3 Sensitivity | 93% |
-| Cohen's Kappa | 0.90 |
+
+### How the Model Was Tested
+
+- **Data:** H&E whole slide images from 218 GI-NET cases (146 G1, 52 G2, 20 G3) from a single institution.
+- **Processing:** each slide was tiled at 40× magnification into 1024×1024-pixel tiles (833,237 tiles in total). Features were extracted with H-optimus-0, and an ABMIL model combined the tiles of each case into one case-level prediction.
+- **Evaluation:** cases were split into training/validation (174; 80%) and a held-out test set (44; 20%).
+- **Limitations:** no external validation, limited numbers of higher-grade tumors, and a single-institution dataset; staining and scanning differences can limit generalizability.
+
+**Images uploaded to this app were not part of that evaluation.** An image of 1024×1024 pixels or smaller is analyzed as a single tile; a larger image is cut into 1024×1024 tiles (tiles with <30% tissue skipped, up to 500 used). Uploading images of different sizes, magnifications, or regions from the same case may lead to different results.
 
 ## Usage
 
@@ -39,7 +52,7 @@ Simply upload an H&E histopathology image (TIFF, PNG, or JPG) and click "Predict
 1. Process the image (tiling for large images)
 2. Extract features using H-optimus-0 foundation model
 3. Predict grade using the ABMIL ensemble
-4. Display results with confidence scores and clinical interpretation
+4. Display results with confidence scores and an interpretation
 
 ## Technical Details
 
@@ -114,7 +127,7 @@ python app.py
 
 ## Disclaimer
 
-This tool is for **research and clinical decision support only**. It is not intended for primary diagnosis. Final grading decisions should be made by a qualified pathologist, ideally with Ki-67 immunohistochemistry when clinically indicated.
+This tool is for **research and testing use only. It is not for clinical use.** It is not a medical device and has not been validated or approved for diagnosis, grading, or treatment decisions. Ki-67 grading must be performed by a qualified pathologist using standard methods, including Ki-67 immunohistochemistry.
 
 ## License
 

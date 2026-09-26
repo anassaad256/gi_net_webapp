@@ -2,7 +2,8 @@
 GI-NET Ki-67 Grade Prediction Web Application.
 
 Hugging Face Spaces deployment for predicting Ki-67 proliferation grade
-(G1 vs G2+G3) from H&E histopathology images.
+(G1 vs G2+G3) from H&E histopathology images. For research and testing use
+only; not for clinical use.
 """
 
 import os
@@ -49,7 +50,7 @@ def predict_grade(image) -> tuple[str, str, str]:
         pred = load_model().predict(image)
 
         # Format results for display
-        result_text = f"## {pred['prediction']}\n\n**Confidence:** {pred['confidence']*100:.1f}%"
+        result_text = f"**⚠️ For research and testing use only. Not for clinical use.**\n\n## {pred['prediction']}\n\n**Confidence:** {pred['confidence']*100:.1f}%"
 
         prob_text = f"""
 ### Class Probabilities
@@ -72,7 +73,7 @@ def predict_grade(image) -> tuple[str, str, str]:
 
 # Create the Gradio interface
 with gr.Blocks(
-    title="GI-NET Ki-67 Grade Prediction",
+    title="GI-NET Ki-67 Grade Prediction (Research Use Only)",
     theme=gr.themes.Soft(),
     css="""
     .main-title {
@@ -84,7 +85,8 @@ with gr.Blocks(
         border: 1px solid #ffc107;
         border-radius: 8px;
         padding: 1rem;
-        margin-top: 1rem;
+        margin: 1rem 0;
+        color: #5c4400;
     }
     """,
 ) as demo:
@@ -92,16 +94,49 @@ with gr.Blocks(
         """
         # 🔬 GI-NET Ki-67 Grade Prediction from H&E
 
+        <div class="disclaimer">
+
+        **⚠️ FOR RESEARCH AND TESTING USE ONLY. NOT FOR CLINICAL USE.**
+        This tool has not been validated or approved for diagnosis, grading, or any
+        patient-care decision.
+
+        </div>
+
         Upload an H&E histopathology image to predict Ki-67 proliferation grade using AI.
 
         **Supported grades:**
         - **G1**: Ki-67 <3% (low proliferation)
         - **G2+G3**: Ki-67 ≥3% (intermediate/high proliferation)
 
-        **Model Performance:** 94.9% accuracy | 0.90 Cohen's kappa | 97% G1 sensitivity | 93% G2+G3 sensitivity
+        **Reported performance (held-out test set of 44 cases, single institution):**
+        94.9% balanced accuracy | κ = 0.90 | 97% G1 sensitivity | 93% G2+G3 sensitivity
         """,
         elem_classes=["main-title"],
     )
+
+    with gr.Accordion("How the model was tested", open=True):
+        gr.Markdown(
+            """
+            - **Data:** H&E whole slide images from 218 GI-NET cases (146 G1, 52 G2, 20 G3)
+              from a single institution.
+            - **Processing:** each slide was tiled at 40× magnification into 1024×1024-pixel
+              tiles (833,237 tiles in total). Features were extracted with H-optimus-0, and an
+              attention-based multiple instance learning (ABMIL) model combined the tiles of
+              each case into one case-level prediction.
+            - **Evaluation:** cases were split into training/validation (174; 80%) and a held-out
+              test set (44; 20%). The performance above is case-level, on those 44 test cases.
+            - **Limitations:** no external validation, limited numbers of higher-grade tumors,
+              and a single-institution dataset; staining and scanning differences can limit
+              generalizability.
+
+            **Images uploaded here were not part of that evaluation.** This app processes an
+            upload based on its size. An image of 1024×1024 pixels or smaller is analyzed as a
+            single tile. A larger image is cut into 1024×1024 tiles, tiles with less than 30%
+            tissue are skipped, and up to 500 tiles (chosen at random when there are more) are
+            combined into one prediction. Uploading images of different sizes, magnifications, or
+            regions from the same case may lead to different results.
+            """
+        )
 
     with gr.Row():
         with gr.Column(scale=1):
@@ -117,7 +152,7 @@ with gr.Blocks(
             prediction_output = gr.Markdown(label="Prediction")
             probability_output = gr.Markdown(label="Probabilities")
 
-    interpretation_output = gr.Markdown(label="Clinical Interpretation")
+    interpretation_output = gr.Markdown(label="Interpretation")
 
     # Connect button to prediction function
     predict_btn.click(
@@ -139,9 +174,10 @@ with gr.Blocks(
 
         <div class="disclaimer">
 
-        **⚠️ Disclaimer:** This tool is for **research and clinical decision support only**.
-        Not intended for primary diagnosis. Final grading decisions should be made by a
-        qualified pathologist. Consider Ki-67 IHC when clinically indicated.
+        **⚠️ Disclaimer: for research and testing use only. Not for clinical use.**
+        This tool is not a medical device and has not been validated or approved for
+        diagnosis, grading, or treatment decisions. Ki-67 grading must be performed by a
+        qualified pathologist using standard methods, including Ki-67 immunohistochemistry.
 
         </div>
 

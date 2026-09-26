@@ -220,7 +220,7 @@ class GINETPredictor:
                 - prob_g1: Probability of G1
                 - prob_g2g3: Probability of G2+G3
                 - n_tiles: Number of tiles analyzed
-                - interpretation: Clinical interpretation text
+                - interpretation: Interpretation text
         """
         # Extract features from image
         features = process_image(image, self.feature_extractor)
@@ -242,7 +242,7 @@ class GINETPredictor:
         pred_class = int(np.argmax(avg_probs))
         confidence = float(avg_probs[pred_class])
 
-        # Generate clinical interpretation
+        # Generate interpretation
         interpretation = self._get_interpretation(pred_class, avg_probs, n_tiles)
 
         return {
@@ -258,7 +258,7 @@ class GINETPredictor:
         self, pred_class: int, probs: np.ndarray, n_tiles: int
     ) -> str:
         """
-        Generate clinical interpretation based on prediction.
+        Generate a research-use interpretation of the prediction.
 
         Args:
             pred_class: Predicted class (0=G1, 1=G2+G3)
@@ -266,46 +266,30 @@ class GINETPredictor:
             n_tiles: Number of tiles analyzed
 
         Returns:
-            Formatted interpretation string with clinical recommendations
+            Formatted interpretation string
         """
         prob_g1 = probs[0] * 100
         prob_g2g3 = probs[1] * 100
 
-        if pred_class == 0:  # G1
-            if prob_g1 >= 90:
-                confidence_level = "high"
-                recommendation = (
-                    "Based on H&E morphology, this case strongly suggests G1 (Ki-67 <3%). "
-                    "Consider whether Ki-67 IHC is necessary."
-                )
-            elif prob_g1 >= 70:
-                confidence_level = "moderate"
-                recommendation = (
-                    "H&E features are consistent with G1, but Ki-67 IHC may be warranted "
-                    "for confirmation."
-                )
-            else:
-                confidence_level = "low"
-                recommendation = (
-                    "Prediction is G1 but with low confidence. Ki-67 IHC is recommended."
-                )
-        else:  # G2+G3
-            if prob_g2g3 >= 90:
-                confidence_level = "high"
-                recommendation = (
-                    "H&E morphology strongly suggests elevated proliferation (G2 or G3). "
-                    "Ki-67 IHC is recommended to determine precise grade."
-                )
-            elif prob_g2g3 >= 70:
-                confidence_level = "moderate"
-                recommendation = (
-                    "Features suggest possible G2/G3. Ki-67 IHC is recommended for accurate grading."
-                )
-            else:
-                confidence_level = "low"
-                recommendation = (
-                    "Prediction is G2+G3 but with low confidence. Ki-67 IHC is essential."
-                )
+        confidence = probs[pred_class] * 100
+        if confidence >= 90:
+            confidence_level = "high"
+        elif confidence >= 70:
+            confidence_level = "moderate"
+        else:
+            confidence_level = "low"
+
+        if n_tiles == 1:
+            tile_note = (
+                "This image was analyzed as a single tile. The reported performance is "
+                "for whole cases (many tiles per case); single-tile results were not "
+                "part of that evaluation."
+            )
+        else:
+            tile_note = (
+                "The reported performance is for whole slides tiled at 40×; results on "
+                "uploaded images were not part of that evaluation."
+            )
 
         grade_text = "G1 (Low Grade)" if pred_class == 0 else "G2+G3 (Intermediate/High Grade)"
 
@@ -318,18 +302,15 @@ class GINETPredictor:
 - G1 (Ki-67 <3%): {prob_g1:.1f}%
 - G2+G3 (Ki-67 ≥3%): {prob_g2g3:.1f}%
 
-**Analysis:** {n_tiles} tissue region(s) analyzed.
-
-**Clinical Recommendation:**
-{recommendation}
+**Analysis:** {n_tiles} tissue region(s) analyzed. {tile_note}
 
 ---
 
-**Model Performance (Validation Data):**
-- Overall Accuracy: 94.9%
+**Reported Performance (held-out test set of 44 cases, single institution, no external validation):**
+- Balanced Accuracy: 94.9% (κ = 0.90)
 - G1 Sensitivity: 97%
 - G2+G3 Sensitivity: 93%
 
-**Disclaimer:** This AI prediction is intended as a clinical decision support tool only. Final grading decisions should be made by a qualified pathologist, ideally with Ki-67 IHC when clinically indicated.
+**⚠️ For research and testing use only. Not for clinical use.** Do not use this output to grade, diagnose, or guide the treatment of any patient.
 """
         return interpretation
