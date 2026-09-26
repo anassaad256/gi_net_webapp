@@ -12,43 +12,47 @@ license: mit
 
 # GI-NET Ki-67 Grade Prediction from H&E
 
-A web application for predicting Ki-67 proliferation grade (G1 vs G2+G3) from H&E histopathology tiles of gastrointestinal neuroendocrine tumors (GI-NETs).
+A web application for predicting Ki-67 proliferation grade (G1 vs G2+G3) from H&E histopathology images of gastrointestinal neuroendocrine tumors (GI-NETs).
 
 > **⚠️ For research and testing use only. Not for clinical use.** This tool has not been validated or approved for diagnosis, grading, or any patient-care decision.
 
 ## Overview
 
-This application uses an Attention-Based Multiple Instance Learning (ABMIL) model ensemble to predict Ki-67 proliferation grade from a set of H&E tiles from one case. As in the published study, all tiles from a case are aggregated into a single case-level prediction.
+This application uses an Attention-Based Multiple Instance Learning (ABMIL) model ensemble to predict Ki-67 proliferation grade directly from H&E stained histopathology images, without requiring Ki-67 immunohistochemistry.
 
 ### Supported Grades
 
 - **G1**: Ki-67 <3% (low proliferation)
 - **G2+G3**: Ki-67 ≥3% (intermediate/high proliferation)
 
-### Model Performance
+### Reported Performance
 
-Held-out test set, n=44 cases, single institution, case level:
+Case-level results on a held-out test set of 44 cases from a single institution (no external validation):
 
 | Metric | Value |
 |--------|-------|
 | Balanced Accuracy | 94.9% |
+| Cohen's Kappa | 0.90 |
 | G1 Sensitivity | 97% |
 | G2+G3 Sensitivity | 93% |
-| Cohen's Kappa | 0.90 |
+
+### How the Model Was Tested
+
+- **Data:** H&E whole slide images from 218 GI-NET cases (146 G1, 52 G2, 20 G3) from a single institution.
+- **Processing:** each slide was tiled at 40× magnification into 1024×1024-pixel tiles (833,237 tiles in total). Features were extracted with H-optimus-0, and an ABMIL model combined the tiles of each case into one case-level prediction.
+- **Evaluation:** cases were split into training/validation (174; 80%) and a held-out test set (44; 20%).
+- **Limitations:** no external validation, limited numbers of higher-grade tumors, and a single-institution dataset; staining and scanning differences can limit generalizability.
+
+**Images uploaded to this app were not part of that evaluation.** An image of 1024×1024 pixels or smaller is analyzed as a single tile; a larger image is cut into 1024×1024 tiles (tiles with <30% tissue skipped, up to 500 used). Uploading images of different sizes, magnifications, or regions from the same case may lead to different results.
 
 ## Usage
 
-Upload tiles from **one case** (multiple PNG/JPG/TIFF files, or a single .zip) and click "Predict Case Grade".
+Simply upload an H&E histopathology image (TIFF, PNG, or JPG) and click "Predict Grade". The application will:
 
-- Tiles should be 1024×1024 px at 40× magnification, as in training; larger images are cut into 1024×1024 tiles.
-- Ideally upload 100 to 500 tiles sampled across the tumor. Fewer than 50 tiles triggers a reliability warning; a single tile is not a meaningful input (tile-level accuracy in the study was about 69%).
-
-The application will:
-
-1. Pool all tiles, reject tiles with <30% tissue, and randomly sample down to 500 tiles (fixed seed)
-2. Extract features for each tile using the H-optimus-0 foundation model
-3. Score the whole bag with the 5-fold ABMIL ensemble
-4. Show the case-level prediction, the most-attended tiles, and attention for every tile
+1. Process the image (tiling for large images)
+2. Extract features using H-optimus-0 foundation model
+3. Predict grade using the ABMIL ensemble
+4. Display results with confidence scores and an interpretation
 
 ## Technical Details
 
@@ -60,12 +64,11 @@ The application will:
 
 ### Image Processing
 
-- **Tiles** (≤1024×1024): each uploaded image is one tile
-- **Large images**: divided into non-overlapping 1024×1024 tiles
-- **Quality control**: minimum 30% tissue content per tile
-- **Maximum 500 tiles per case** (random sample if more), matching training
-- All tiles resized to 224×224 for feature extraction
-- **Attention**: averaged across the 5 fold models and shown per tile
+- **Small images** (≤1024×1024): Processed as single tile
+- **Large images**: Divided into 1024×1024 tiles with quality control
+  - Minimum 30% tissue content required per tile
+  - Maximum 500 tiles per image
+  - All tiles resized to 224×224 for feature extraction
 
 ## Local Installation
 
@@ -124,7 +127,7 @@ python app.py
 
 ## Disclaimer
 
-This tool is for **research and testing use only. It is not for clinical use.** It is not a medical device and has not been validated or approved for diagnosis, grading, or treatment decisions. It was developed on a single-institution dataset. Ki-67 grading must be performed by a qualified pathologist using standard methods, including Ki-67 immunohistochemistry.
+This tool is for **research and testing use only. It is not for clinical use.** It is not a medical device and has not been validated or approved for diagnosis, grading, or treatment decisions. Ki-67 grading must be performed by a qualified pathologist using standard methods, including Ki-67 immunohistochemistry.
 
 ## License
 

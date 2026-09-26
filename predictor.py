@@ -6,7 +6,6 @@ and the ABMIL ensemble for predicting Ki-67 proliferation grade from H&E images.
 """
 
 import os
-from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -66,106 +65,90 @@ def download_weights_from_hub(repo_id: str, local_dir: str) -> None:
         raise RuntimeError(f"Failed to download weights from {repo_id}: {e}")
 
 
-TILE_SIZE = 1024
-MODEL_INPUT_SIZE = 224
-MAX_TILES = 500
-MIN_TISSUE_RATIO = 0.3
-MIN_RECOMMENDED_TILES = 50
-
-RESEARCH_USE_NOTICE = (
-    "**⚠️ For research and testing use only. Not for clinical use.** "
-    "This tool has not been validated or approved for diagnosis or patient care."
-)
-
-
-def _to_rgb_array(image: np.ndarray | Image.Image) -> np.ndarray:
-    """Convert a PIL Image or array to an RGB uint8 numpy array."""
-    if isinstance(image, Image.Image):
-        return np.array(image.convert("RGB"))
-    if image.ndim == 2:
-        return np.stack([image] * 3, axis=-1)
-    return image[..., :3]
-
-
-def _resize(image: np.ndarray, size: int) -> np.ndarray:
-    """Resize an RGB array to size x size."""
-    if HAS_CV2:
-        return cv2.resize(image, (size, size), interpolation=cv2.INTER_AREA)
-    pil_img = Image.fromarray(image).resize((size, size), Image.Resampling.LANCZOS)
-    return np.array(pil_img)
-
-
-def tissue_ratio(tile: np.ndarray) -> float:
-    """Fraction of pixels that look like tissue (same QC rule as training)."""
-    if HAS_CV2:
-        gray = cv2.cvtColor(tile, cv2.COLOR_RGB2GRAY)
-    else:
-        gray = np.mean(tile, axis=2).astype(np.uint8)
-    tissue_mask = (gray < 220) & (gray > 30)
-    return float(tissue_mask.sum() / tissue_mask.size)
-
-
-def extract_tiles(
-    images: Iterable[tuple[str, np.ndarray | Image.Image]],
-    tile_size: int = TILE_SIZE,
-    max_tiles: int = MAX_TILES,
-    min_tissue_ratio: float = MIN_TISSUE_RATIO,
-    seed: int = 0,
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def process_image(
+    image: np.ndarray | Image.Image,
+    feature_extractor: FeatureExtractor,
+    tile_size: int = 1024,
+    max_tiles: int = 500,
+) -> np.ndarray:
     """
-    Turn a set of uploaded images from one case into a bag of tiles.
+    Process uploaded image into features.
 
-    Images no larger than tile_size are treated as one tile each (the expected
-    input: 1024x1024 tiles at 40x). Larger images are cut into non-overlapping
-    tile_size tiles. Every tile goes through the same tissue QC used in training,
-    and the bag is randomly sampled down to max_tiles, as in training.
+    For small images (<= 1024x1024): Treat as single tile
+    For large images: Extract tiles, apply QC, extract features
 
     Args:
-        images: (name, image) pairs belonging to one case
-        tile_size: Tile size used to cut large images
-        max_tiles: Maximum number of tiles kept per case
-        min_tissue_ratio: Minimum tissue fraction for a tile to pass QC
-        seed: Random seed for reproducible sampling
+        image: Input image as numpy array or PIL Image
+        feature_extractor: Feature extractor instance
+        tile_size: Size of tiles to extract from large images
+        max_tiles: Maximum number of tiles to process
 
     Returns:
-        tiles: List of dicts with "name" and "image" (224x224 RGB array)
-        stats: Counts of candidate, rejected and sampled-out tiles
+        Feature array of shape (n_tiles, 1536)
     """
-    # Tiles are QC'd and downsized as they are cut, so only one full-size
-    # image is held in memory at a time when `images` is a generator.
-    n_candidates = 0
-    tiles = []
-    for name, image in images:
-        image = _to_rgb_array(image)
-        h, w = image.shape[:2]
+    # Convert PIL Image to numpy if needed
+    if isinstance(image, Image.Image):
+        image = np.array(image.convert("RGB"))
 
-        if h <= tile_size and w <= tile_size:
-            candidates = [(name, image)]
+    h, w = image.shape[:2]
+
+    # Small image - treat as single tile
+    if h <= tile_size and w <= tile_size:
+        if HAS_CV2:
+            resized = cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA)
         else:
-            candidates = [
-                (f"{name} @ ({x}, {y})", image[y : y + tile_size, x : x + tile_size])
-                for y in range(0, h - tile_size + 1, tile_size)
-                for x in range(0, w - tile_size + 1, tile_size)
-            ]
+            pil_img = Image.fromarray(image)
+            pil_img = pil_img.resize((224, 224), Image.Resampling.LANCZOS)
+            resized = np.array(pil_img)
+        features = feature_extractor.extract(resized)
+        return features.reshape(1, -1)  # (1, 1536)
 
-        for tile_name, tile in candidates:
-            n_candidates += 1
-            if tissue_ratio(tile) >= min_tissue_ratio:
-                tiles.append({"name": tile_name, "image": _resize(tile, MODEL_INPUT_SIZE)})
+    # Large image - extract tiles
+    tiles = []
+    step = tile_size
 
-    n_passed_qc = len(tiles)
+    for y in range(0, h - tile_size + 1, step):
+        for x in range(0, w - tile_size + 1, step):
+            tile = image[y : y + tile_size, x : x + tile_size]
+
+            # Quality control: check tissue content
+            if HAS_CV2:
+                gray = cv2.cvtColor(tile, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = np.mean(tile, axis=2).astype(np.uint8)
+
+            tissue_mask = (gray < 220) & (gray > 30)
+            tissue_ratio = tissue_mask.sum() / tissue_mask.size
+
+            if tissue_ratio >= 0.3:  # At least 30% tissue
+                if HAS_CV2:
+                    resized_tile = cv2.resize(
+                        tile, (224, 224), interpolation=cv2.INTER_AREA
+                    )
+                else:
+                    pil_tile = Image.fromarray(tile)
+                    pil_tile = pil_tile.resize((224, 224), Image.Resampling.LANCZOS)
+                    resized_tile = np.array(pil_tile)
+                tiles.append(resized_tile)
+
+    # Fallback: use whole image resized if no tiles pass QC
+    if not tiles:
+        if HAS_CV2:
+            resized = cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA)
+        else:
+            pil_img = Image.fromarray(image)
+            pil_img = pil_img.resize((224, 224), Image.Resampling.LANCZOS)
+            resized = np.array(pil_img)
+        tiles = [resized]
+
+    # Limit number of tiles
     if len(tiles) > max_tiles:
-        rng = np.random.default_rng(seed)
-        keep = sorted(rng.choice(len(tiles), max_tiles, replace=False))
-        tiles = [tiles[i] for i in keep]
+        indices = np.random.choice(len(tiles), max_tiles, replace=False)
+        tiles = [tiles[i] for i in indices]
 
-    stats = {
-        "n_candidates": n_candidates,
-        "n_rejected_qc": n_candidates - n_passed_qc,
-        "n_sampled_out": n_passed_qc - len(tiles),
-        "n_used": len(tiles),
-    }
-    return tiles, stats
+    # Extract features from all tiles
+    features = feature_extractor.extract_batch(tiles)
+    return features  # (n_tiles, 1536)
 
 
 class GINETPredictor:
@@ -223,19 +206,12 @@ class GINETPredictor:
         print("All models loaded successfully!")
 
     @torch.no_grad()
-    def predict_case(
-        self, images: Iterable[tuple[str, np.ndarray | Image.Image]]
-    ) -> dict[str, Any]:
+    def predict(self, image: np.ndarray | Image.Image) -> dict[str, Any]:
         """
-        Predict the Ki-67 grade of one case from a set of H&E tiles.
-
-        All tiles are pooled into a single bag and scored together by the ABMIL
-        ensemble, matching how the model was trained and validated (case level,
-        up to 500 tiles per case).
+        Predict Ki-67 grade from image.
 
         Args:
-            images: (name, image) pairs from one case. Each image is a
-                1024x1024 tile at 40x, or a larger region that gets tiled.
+            image: Input H&E histopathology image
 
         Returns:
             Dictionary containing:
@@ -244,41 +220,29 @@ class GINETPredictor:
                 - prob_g1: Probability of G1
                 - prob_g2g3: Probability of G2+G3
                 - n_tiles: Number of tiles analyzed
-                - tile_stats: Counts from tiling and QC (see extract_tiles)
-                - tiles: Per-tile dicts with "name", "image" and "attention",
-                  sorted by attention (highest first)
-                - interpretation: Clinical interpretation text
+                - interpretation: Interpretation text
         """
-        tiles, tile_stats = extract_tiles(images)
-        if not tiles:
-            raise ValueError(
-                f"None of the {tile_stats['n_candidates']} tile(s) passed tissue QC "
-                f"(at least {MIN_TISSUE_RATIO:.0%} tissue). Upload tiles that are "
-                "mostly tumor rather than background or glass."
-            )
-        n_tiles = len(tiles)
+        # Extract features from image
+        features = process_image(image, self.feature_extractor)
+        n_tiles = len(features)
 
-        features = self.feature_extractor.extract_batch([t["image"] for t in tiles])
+        # Prepare input tensor
         x = torch.from_numpy(features).float().unsqueeze(0).to(self.device)
         mask = torch.ones(1, n_tiles).to(self.device)
 
-        # Ensemble prediction - average probabilities and attention over folds
+        # Ensemble prediction - average probabilities from all models
         all_probs = []
-        all_attn = []
         for model in self.models:
-            logits, attn = model(x, mask)
-            all_probs.append(F.softmax(logits, dim=1).cpu().numpy()[0])
-            all_attn.append(attn.cpu().numpy()[0])
+            logits, _ = model(x, mask)
+            probs = F.softmax(logits, dim=1).cpu().numpy()[0]
+            all_probs.append(probs)
 
+        # Average probabilities across ensemble
         avg_probs = np.mean(all_probs, axis=0)
-        avg_attn = np.mean(all_attn, axis=0)
         pred_class = int(np.argmax(avg_probs))
         confidence = float(avg_probs[pred_class])
 
-        for tile, weight in zip(tiles, avg_attn):
-            tile["attention"] = float(weight)
-        tiles.sort(key=lambda t: t["attention"], reverse=True)
-
+        # Generate interpretation
         interpretation = self._get_interpretation(pred_class, avg_probs, n_tiles)
 
         return {
@@ -287,14 +251,8 @@ class GINETPredictor:
             "prob_g1": float(avg_probs[0]),
             "prob_g2g3": float(avg_probs[1]),
             "n_tiles": n_tiles,
-            "tile_stats": tile_stats,
-            "tiles": tiles,
             "interpretation": interpretation,
         }
-
-    def predict(self, image: np.ndarray | Image.Image) -> dict[str, Any]:
-        """Predict from a single image; see predict_case for the multi-tile path."""
-        return self.predict_case([("image", image)])
 
     def _get_interpretation(
         self, pred_class: int, probs: np.ndarray, n_tiles: int
@@ -312,8 +270,8 @@ class GINETPredictor:
         """
         prob_g1 = probs[0] * 100
         prob_g2g3 = probs[1] * 100
-        confidence = probs[pred_class] * 100
 
+        confidence = probs[pred_class] * 100
         if confidence >= 90:
             confidence_level = "high"
         elif confidence >= 70:
@@ -321,47 +279,38 @@ class GINETPredictor:
         else:
             confidence_level = "low"
 
-        if pred_class == 0:  # G1
-            summary = "The model's output favors G1 (Ki-67 <3%) for this set of tiles."
-        else:  # G2+G3
-            summary = "The model's output favors G2+G3 (Ki-67 ≥3%) for this set of tiles."
-        if confidence_level == "low":
-            summary += " The two classes are close, so treat this output as indeterminate."
-
-        tile_warning = ""
-        if n_tiles < MIN_RECOMMENDED_TILES:
-            tile_warning = (
-                f"\n**Caution:** only {n_tiles} tile(s) were analyzed. The model was "
-                f"validated on whole cases (up to {MAX_TILES} tiles each); predictions "
-                f"from fewer than {MIN_RECOMMENDED_TILES} tiles are much less reliable.\n"
+        if n_tiles == 1:
+            tile_note = (
+                "This image was analyzed as a single tile. The reported performance is "
+                "for whole cases (many tiles per case); single-tile results were not "
+                "part of that evaluation."
+            )
+        else:
+            tile_note = (
+                "The reported performance is for whole slides tiled at 40×; results on "
+                "uploaded images were not part of that evaluation."
             )
 
         grade_text = "G1 (Low Grade)" if pred_class == 0 else "G2+G3 (Intermediate/High Grade)"
 
         interpretation = f"""
-{RESEARCH_USE_NOTICE}
+### Prediction: {grade_text}
 
-### Model output: {grade_text}
-
-**Confidence Level:** {confidence_level.upper()} ({confidence:.1f}%)
+**Confidence Level:** {confidence_level.upper()} ({probs[pred_class]*100:.1f}%)
 
 **Probabilities:**
 - G1 (Ki-67 <3%): {prob_g1:.1f}%
 - G2+G3 (Ki-67 ≥3%): {prob_g2g3:.1f}%
 
-**Analysis:** {n_tiles} tile(s) aggregated with attention-based MIL.
-{tile_warning}
-**Summary:** {summary}
+**Analysis:** {n_tiles} tissue region(s) analyzed. {tile_note}
 
 ---
 
-**Model Performance (held-out test set, n=44 cases, single institution, case level):**
-- Balanced Accuracy: 94.9%
+**Reported Performance (held-out test set of 44 cases, single institution, no external validation):**
+- Balanced Accuracy: 94.9% (κ = 0.90)
 - G1 Sensitivity: 97%
 - G2+G3 Sensitivity: 93%
 
-These results come from a single-institution research dataset and have not been
-validated for clinical use. Do not use this output to grade, diagnose, or guide
-the treatment of any patient.
+**⚠️ For research and testing use only. Not for clinical use.** Do not use this output to grade, diagnose, or guide the treatment of any patient.
 """
         return interpretation
