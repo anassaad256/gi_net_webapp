@@ -12,11 +12,13 @@ license: mit
 
 # GI-NET Ki-67 Grade Prediction from H&E
 
-A web application for predicting Ki-67 proliferation grade (G1 vs G2+G3) from H&E histopathology images of gastrointestinal neuroendocrine tumors (GI-NETs).
+A web application for predicting Ki-67 proliferation grade (G1 vs G2+G3) from H&E histopathology tiles of gastrointestinal neuroendocrine tumors (GI-NETs).
+
+> **⚠️ For research and testing use only. Not for clinical use.** This tool has not been validated or approved for diagnosis, grading, or any patient-care decision.
 
 ## Overview
 
-This application uses an Attention-Based Multiple Instance Learning (ABMIL) model ensemble to predict Ki-67 proliferation grade directly from H&E stained histopathology images, without requiring Ki-67 immunohistochemistry.
+This application uses an Attention-Based Multiple Instance Learning (ABMIL) model ensemble to predict Ki-67 proliferation grade from a set of H&E tiles from one case. As in the published study, all tiles from a case are aggregated into a single case-level prediction.
 
 ### Supported Grades
 
@@ -25,21 +27,28 @@ This application uses an Attention-Based Multiple Instance Learning (ABMIL) mode
 
 ### Model Performance
 
+Held-out test set, n=44 cases, single institution, case level:
+
 | Metric | Value |
 |--------|-------|
-| Overall Accuracy | 94.9% |
+| Balanced Accuracy | 94.9% |
 | G1 Sensitivity | 97% |
 | G2+G3 Sensitivity | 93% |
 | Cohen's Kappa | 0.90 |
 
 ## Usage
 
-Simply upload an H&E histopathology image (TIFF, PNG, or JPG) and click "Predict Grade". The application will:
+Upload tiles from **one case** (multiple PNG/JPG/TIFF files, or a single .zip) and click "Predict Case Grade".
 
-1. Process the image (tiling for large images)
-2. Extract features using H-optimus-0 foundation model
-3. Predict grade using the ABMIL ensemble
-4. Display results with confidence scores and clinical interpretation
+- Tiles should be 1024×1024 px at 40× magnification, as in training; larger images are cut into 1024×1024 tiles.
+- Ideally upload 100 to 500 tiles sampled across the tumor. Fewer than 50 tiles triggers a reliability warning; a single tile is not a meaningful input (tile-level accuracy in the study was about 69%).
+
+The application will:
+
+1. Pool all tiles, reject tiles with <30% tissue, and randomly sample down to 500 tiles (fixed seed)
+2. Extract features for each tile using the H-optimus-0 foundation model
+3. Score the whole bag with the 5-fold ABMIL ensemble
+4. Show the case-level prediction, the most-attended tiles, and attention for every tile
 
 ## Technical Details
 
@@ -51,11 +60,12 @@ Simply upload an H&E histopathology image (TIFF, PNG, or JPG) and click "Predict
 
 ### Image Processing
 
-- **Small images** (≤1024×1024): Processed as single tile
-- **Large images**: Divided into 1024×1024 tiles with quality control
-  - Minimum 30% tissue content required per tile
-  - Maximum 500 tiles per image
-  - All tiles resized to 224×224 for feature extraction
+- **Tiles** (≤1024×1024): each uploaded image is one tile
+- **Large images**: divided into non-overlapping 1024×1024 tiles
+- **Quality control**: minimum 30% tissue content per tile
+- **Maximum 500 tiles per case** (random sample if more), matching training
+- All tiles resized to 224×224 for feature extraction
+- **Attention**: averaged across the 5 fold models and shown per tile
 
 ## Local Installation
 
@@ -114,7 +124,7 @@ python app.py
 
 ## Disclaimer
 
-This tool is for **research and clinical decision support only**. It is not intended for primary diagnosis. Final grading decisions should be made by a qualified pathologist, ideally with Ki-67 immunohistochemistry when clinically indicated.
+This tool is for **research and testing use only. It is not for clinical use.** It is not a medical device and has not been validated or approved for diagnosis, grading, or treatment decisions. It was developed on a single-institution dataset. Ki-67 grading must be performed by a qualified pathologist using standard methods, including Ki-67 immunohistochemistry.
 
 ## License
 
